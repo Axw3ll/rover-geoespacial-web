@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monitoreo · Estación Geoespacial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<main>
+  <div class="page-title">
+    <div><h1>Monitoreo en tiempo real</h1><p class="muted small" style="margin:0">Mensajes del rover recibidos por MQTT sobre WebSockets (LoRa → gateway 2G → broker).</p></div>
+    <div class="btn-group">
+      <button class="btn" data-cmd="ENV">Leer ambiente</button>
+      <button class="btn" data-cmd="GPS">Leer GPS</button>
+      <button class="btn" data-cmd="GPS STATUS">Estado GPS</button>
+      <button class="btn" data-cmd="RTC">Hora RTC</button>
+    </div>
+  </div>
+
+  <section class="grid g4">
+    <div class="card kpi"><span class="label">Temperatura</span><span class="value" id="vT">—<small>°C</small></span><span class="sub" id="vTs">AHT20 / BMP280</span></div>
+    <div class="card kpi"><span class="label">Presión atmosférica</span><span class="value" id="vP">—<small>hPa</small></span><span class="sub">BMP280</span></div>
+    <div class="card kpi"><span class="label">Humedad relativa</span><span class="value" id="vH">—<small>%</small></span><span class="sub">AHT20</span></div>
+    <div class="card kpi"><span class="label">Enlace con el rover</span><span class="value" style="font-size:1.1rem" id="vLink"><span class="dot"></span> sin datos</span><span class="sub" id="vRadio">—</span></div>
+  </section>
+
+  <section class="grid g3" style="margin-top:1rem">
+    <div class="card span2">
+      <div class="card-head">
+        <h2>Posición del vehículo</h2>
+        <div class="btn-group">
+          <span class="badge" id="vFix">GPS: —</span>
+          <label class="badge" style="margin:0;cursor:pointer"><input type="checkbox" id="follow" checked style="width:auto;margin:0 .3rem 0 0">Seguir</label>
+          <button class="btn sm" id="clearTrail">Limpiar rastro</button>
+        </div>
+      </div>
+      <div id="map" class="map tall"></div>
+      <p class="muted small" id="posText" style="margin:.5rem 0 0">Sin posición todavía.</p>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="card">
+        <div class="card-head"><h2>Estado</h2></div>
+        <table><tbody>
+          <tr><td class="muted">Modo AUTO</td><td id="sAuto" class="mono">—</td></tr>
+          <tr><td class="muted">Seguidor de línea</td><td id="sLine" class="mono">—</td></tr>
+          <tr><td class="muted">IR (izq/centro/der)</td><td id="sIr" class="mono">—</td></tr>
+          <tr><td class="muted">Satélites</td><td id="sSat" class="mono">—</td></tr>
+          <tr><td class="muted">RTC</td><td id="sRtc" class="mono">—</td></tr>
+          <tr><td class="muted">Planificador</td><td id="sPlan" class="small">—</td></tr>
+        </tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Radar ultrasónico</h2><span class="muted small" id="radarInfo">0–200 cm</span></div>
+        <canvas id="radar" width="320" height="170" style="width:100%"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid g2" style="margin-top:1rem">
+    <div class="card">
+      <div class="card-head"><h2>Temperatura y presión</h2><span class="muted small">últimas 2 h + en vivo</span></div>
+      <div class="chart-box"><canvas id="chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Bitácora</h2><button class="btn sm" id="clearLog">Limpiar</button></div>
+      <div id="log" class="log"></div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:1rem" data-admin>
+    <div class="card-head"><h2>Sondeo automático de sensores</h2><span class="muted small">Administrador · el rover guarda contadores en NVS por cada mensaje LoRa: evita intervalos muy cortos</span></div>
+    <div class="row">
+      <div class="field"><label>Sensor</label><select id="pollSensor"><option>ENV</option><option>GPS</option><option>IR</option><option>RTC</option></select></div>
+      <div class="field"><label>Intervalo (s, 0 = apagar)</label><input id="pollSec" type="number" min="0" max="3600" value="10"></div>
+      <button class="btn primary" id="pollBtn">Aplicar POLL</button>
+      <button class="btn" data-cmd="POLL SHOW">Ver sondeos</button>
+    </div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/vendor/mqtt/mqtt.min.js"></script>
+<script src="/js/roverlib.js"></script>
+<script src="/js/common.js"></script>
+<script>
+(async () => {
+  await App.init('/monitoreo.html');
+  const link = await new App.RoverLink().connect();
+
+  // ---------- Mapa ----------
+  const map = App.createMap('map');
+  const marker = L.marker(map.getCenter(), { icon: App.roverIcon() });
+  const trail = L.polyline([], { color: '#2fd3b4', weight: 3, opacity: .85 }).addTo(map);
+  let hasPos = false;
+  function setPosition(lat, lon, label, ts) {
+    marker.setLatLng([lat, lon]);
+    if (!hasPos) { marker.addTo(map); map.setView([lat, lon], 18); hasPos = true; }
+    else if (follow.checked) map.panTo([lat, lon]);
+    trail.addLatLng([lat, lon]);
+    posText.textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)} · ${label} · ${App.fmtDate(ts)} · recorrido: ${RoverLib.pathLengthM(trail.getLatLngs().map(p => ({ lat: p.lat, lon: p.lng }))).toFixed(1)} m`;
+  }
+  clearTrail.onclick = () => trail.setLatLngs([]);
+
+  // ---------- Gráfica ----------
+  const chart = App.lineChart(document.getElementById('chart'), [
+    { label: 'Temperatura (°C)', data: [], borderColor: '#f5a524', yAxisID: 'y' },
+    { label: 'Presión (hPa)', data: [], borderColor: '#2fd3b4', yAxisID: 'y2' }
+  ], { yTitle: '°C', y2Title: 'hPa' });
+  function addEnv(ts, d) {
+    if (typeof d.T === 'number') chart.data.datasets[0].data.push({ x: ts, y: d.T });
+    if (typeof d.P === 'number') chart.data.datasets[1].data.push({ x: ts, y: d.P });
+    chart.data.datasets.forEach(ds => { if (ds.data.length > 1500) ds.data.shift(); });
+  }
+
+  // ---------- Radar ----------
+  const radar = document.getElementById('radar').getContext('2d');
+  const radarPts = {};
+  function drawRadar() {
+    const w = 320, h = 170, cx = w / 2, cy = h - 10, R = 150, MAX = 200;
+    radar.clearRect(0, 0, w, h);
+    radar.strokeStyle = 'rgba(47,211,180,.25)'; radar.lineWidth = 1;
+    for (let r = 1; r <= 4; r++) { radar.beginPath(); radar.arc(cx, cy, R * r / 4, Math.PI, 0); radar.stroke(); }
+    for (let a = 0; a <= 180; a += 30) {
+      const t = a * Math.PI / 180;
+      radar.beginPath(); radar.moveTo(cx, cy); radar.lineTo(cx + R * Math.cos(t), cy - R * Math.sin(t)); radar.stroke();
+    }
+    const now = Date.now();
+    Object.entries(radarPts).forEach(([a, p]) => {
+      if (p.dist < 2 || p.dist > MAX || now - p.at > 60000) return;
+      const t = a * Math.PI / 180, r = p.dist / MAX * R;
+      radar.fillStyle = p.dist <= 30 ? '#ef5b5b' : '#f5a524';
+      radar.beginPath(); radar.arc(cx + r * Math.cos(t), cy - r * Math.sin(t), 4, 0, 2 * Math.PI); radar.fill();
+    });
+    radar.fillStyle = '#8ea2b5'; radar.font = '11px JetBrains Mono';
+    radar.fillText('der 0°', w - 50, h - 2); radar.fillText('180° izq', 4, h - 2);
+  }
+  drawRadar();
+
+  // ---------- Bitácora ----------
+  const logEl = document.getElementById('log');
+  function log(text, cls = 'in', ts = Date.now()) {
+    const div = document.createElement('div');
+    div.className = 'l';
+    div.innerHTML = `<span class="t">${App.fmtTime(ts)}</span><span class="${cls}">${App.esc(text)}</span>`;
+    logEl.appendChild(div);
+    while (logEl.children.length > 400) logEl.firstChild.remove();
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  clearLog.onclick = () => (logEl.innerHTML = '');
+
+  // ---------- Procesamiento de mensajes ----------
+  let lastMsgAt = 0, lastRadio = null;
+  function handle(p, ts, live) {
+    const d = p.data;
+    if (live) {
+      log(p.raw, p.sensor === 'ERROR' ? 'err' : (p.sensor === 'EVENT' ? 'ok' : 'in'), ts);
+      lastMsgAt = ts; if (p.radio) lastRadio = p.radio;
+    }
+    switch (p.sensor) {
+      case 'ENV':
+        if (typeof d.T === 'number') vT.innerHTML = `${d.T.toFixed(1)}<small>°C</small>`;
+        if (typeof d.P === 'number') vP.innerHTML = `${d.P.toFixed(1)}<small>hPa</small>`;
+        if (typeof d.H === 'number') vH.innerHTML = `${d.H.toFixed(1)}<small>%</small>`;
+        vTs.textContent = `Actualizado ${App.fmtTime(ts)}`;
+        if (live) { addEnv(ts, d); chart.update('none'); }
+        break;
+      case 'GPS':
+        if (d.fix === false) vFix.textContent = 'GPS: sin fix';
+        if (d.tags && d.tags.includes('STATUS')) {
+          if (d.SAT !== undefined) sSat.textContent = d.SAT;
+          if (d.FIX !== undefined) vFix.textContent = `GPS: ${d.FIX ? 'fix' : 'sin fix'}`;
+        }
+        if (p.location) { vFix.textContent = 'GPS: fix'; setPosition(p.location.lat, p.location.lon, 'GPS', ts); }
+        break;
+      case 'REQUEST':
+        if (p.location) setPosition(p.location.lat, p.location.lon, 'petición de ruta', ts);
+        break;
+      case 'AUTO':
+        if (d.tags && d.tags[0] === 'STATE') sAuto.textContent = d.tags[1] || '—';
+        break;
+      case 'LINE_FOLLOW':
+        sLine.textContent = d.STATE ? `${d.STATE} (RAW ${d.RAW})` : (d.tags || []).join(' ');
+        break;
+      case 'IR':
+        sIr.textContent = `${d.LEFT} / ${d.CENTER} / ${d.RIGHT}`;
+        break;
+      case 'RTC':
+        if (d.stamp) sRtc.textContent = d.stamp;
+        break;
+      case 'RADAR':
+        if (typeof d.ANGLE === 'number') radarPts[d.ANGLE] = { dist: d.DIST_CM, at: ts };
+        (d.points || []).forEach(pt => (radarPts[pt.angle] = { dist: pt.dist, at: ts }));
+        if (d.SCAN_ID !== undefined) radarInfo.textContent = `barrido #${d.SCAN_ID} parte ${d.PART}`;
+        drawRadar();
+        break;
+      case 'EVENT':
+        if (d.event === 'ARRIVED') sAuto.textContent = 'ARRIVED';
+        if (d.event === 'AUTO_BLOCKED') sAuto.textContent = 'BLOCKED';
+        if (d.event === 'OBSTACLE' && typeof d.ANGLE === 'number') { radarPts[d.ANGLE] = { dist: d.DIST_CM, at: ts }; drawRadar(); }
+        break;
+      case 'OK':
+        if (d.tags && d.tags[0] === 'AUTO_ON') sAuto.textContent = 'WAIT_ROUTE';
+        if (d.tags && d.tags[0] === 'AUTO_OFF') sAuto.textContent = 'OFF';
+        break;
+    }
+  }
+
+  link.on('rover', p => handle(p, p.receivedAt, true));
+  link.on('sent', cmd => log(`> ${cmd}`, 'out'));
+  link.on('planner', s => { sPlan.textContent = `${s.state}${s.distanceM !== undefined ? ` · ${s.distanceM} m` : ''} — ${s.message || ''}`; });
+
+  setInterval(() => {
+    if (!lastMsgAt) return;
+    const age = Math.round((Date.now() - lastMsgAt) / 1000);
+    const cls = age < 20 ? 'on' : age < 60 ? 'warn' : 'off';
+    vLink.innerHTML = `<span class="dot ${cls}"></span> hace ${age} s`;
+    vRadio.textContent = lastRadio && lastRadio.rssi !== undefined ? `RSSI ${lastRadio.rssi} dBm · SNR ${lastRadio.snr ?? '—'} dB` : 'Último mensaje recibido';
+  }, 1000);
+
+  // ---------- Historial reciente desde MongoDB ----------
+  const from = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+  try {
+    const [series, trailPts, recent] = await Promise.all([
+      App.api(`/api/records/series?from=${from}&limit=1500`),
+      App.api(`/api/records/trail?from=${from}&source=lora&limit=3000`),
+      App.api('/api/records?limit=40&source=lora,web')
+    ]);
+    series.forEach(r => addEnv(new Date(r.ts).getTime(), r.data));
+    chart.update('none');
+    trailPts.forEach(pt => setPosition(pt.lat, pt.lon, pt.sensor, pt.ts));
+    recent.items.reverse().forEach(r => {
+      const ts = new Date(r.ts).getTime();
+      log(r.category === 'comando' ? `> ${r.raw}` : r.raw, r.category === 'comando' ? 'out' : 'in', ts);
+      if (r.category !== 'comando') handle(RoverLib.parseRoverMessage(r.raw), ts, false);
+    });
+  } catch (e) { App.toast(`Historial: ${e.message}`, 'warn'); }
+
+  // ---------- Botones de comandos ----------
+  document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => link.send(b.dataset.cmd));
+  pollBtn.onclick = () => link.send(`POLL ${pollSensor.value} ${Math.max(0, parseInt(pollSec.value, 10) || 0)}`)
+    .then(() => App.toast('Comando enviado al gateway'));
+})();
+</script>
+</body>
+</html>

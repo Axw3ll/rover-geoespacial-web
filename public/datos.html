@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Base de datos · Estación Geoespacial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<main>
+  <div class="page-title">
+    <div><h1>Base de datos y análisis</h1><p class="muted small" style="margin:0">Registros del datalogger en MongoDB: en vivo (LoRa), importados (microSD), comandos (web) y manuales.</p></div>
+    <div class="btn-group">
+      <a class="btn" id="expCsv">Exportar CSV</a>
+      <a class="btn" id="expJson">Exportar JSON</a>
+      <a class="btn" id="expKml" title="Para comparar con Google Earth Pro">Exportar KML</a>
+      <button class="btn primary" id="newBtn" data-admin>+ Nuevo registro</button>
+    </div>
+  </div>
+
+  <!-- ================= FILTROS ================= -->
+  <section class="card">
+    <form id="filters">
+      <div class="row">
+        <div class="field"><label>Sensor / tipo</label>
+          <select name="sensor"><option value="">Todos</option><option>ENV</option><option>GPS</option><option>RADAR</option><option>DIST</option><option>IR</option><option>RTC</option><option>LINE_FOLLOW</option><option>EVENT</option><option>REQUEST</option><option>ROUTE_CONFIG</option><option>AUTO</option><option>OK</option><option>ERROR</option><option>CMD</option></select></div>
+        <div class="field"><label>Apartado</label>
+          <select name="category"><option value="">Todos</option><option value="telemetria">Telemetría</option><option value="evento">Eventos</option><option value="respuesta">Respuestas</option><option value="estado">Estado</option><option value="comando">Comandos</option></select></div>
+        <div class="field"><label>Origen</label>
+          <select name="source"><option value="">Todos</option><option value="lora">LoRa (en vivo)</option><option value="microsd">microSD</option><option value="web">Web (comandos)</option><option value="manual">Manual</option></select></div>
+        <div class="field"><label>Desde</label><input type="datetime-local" name="from"></div>
+        <div class="field"><label>Hasta</label><input type="datetime-local" name="to"></div>
+      </div>
+      <div class="row" style="margin-top:.6rem">
+        <div class="field" style="flex:2"><label>Buscar en el mensaje</label><input name="q" placeholder="ej. OBSTACLE, BATCH, T=2"></div>
+        <div class="field"><label>Cerca de (lat, lon)</label><input name="near" placeholder="19.2433,-103.7250"></div>
+        <div class="field"><label>Radio (m)</label><input name="radius" type="number" min="1" value="50"></div>
+        <div class="field"><label>Archivo microSD</label><select name="uploadId" id="uploadFilter"><option value="">Cualquiera</option></select></div>
+        <button class="btn primary">Aplicar</button>
+        <button class="btn" type="reset" id="resetBtn">Limpiar</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ================= TABLA CRUD ================= -->
+  <section class="card" style="margin-top:1rem">
+    <div class="card-head"><h2>Registros</h2><span class="muted small" id="countInfo"></span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Fecha / hora</th><th>Sensor</th><th>Apartado</th><th>Origen</th><th>Mensaje</th><th>Posición</th><th></th></tr></thead>
+        <tbody id="tbody"><tr><td colspan="7" class="muted">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <select id="pageSize" style="width:auto"><option>25</option><option>50</option><option>100</option></select>
+      <button class="btn sm" id="prev">‹ Anterior</button><span id="pageInfo"></span><button class="btn sm" id="next">Siguiente ›</button>
+    </div>
+  </section>
+
+  <!-- ================= GRÁFICAS ================= -->
+  <section class="grid g2" style="margin-top:1rem">
+    <div class="card">
+      <div class="card-head"><h2>Temperatura y presión</h2><span class="muted small">según filtros de fecha y origen</span></div>
+      <div class="chart-box"><canvas id="envChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Distancia recorrida vs tiempo</h2><span class="muted small" id="distInfo"></span></div>
+      <div class="chart-box"><canvas id="distChart"></canvas></div>
+    </div>
+    <div class="card span2">
+      <div class="card-head"><h2>Rastro del vehículo</h2>
+        <div class="btn-group"><span class="muted small" id="trailInfo"></span><button class="btn sm" id="useCenter">Usar centro como filtro “cerca de”</button></div></div>
+      <div id="trailMap" class="map"></div>
+    </div>
+  </section>
+
+  <!-- ================= MICRO SD ================= -->
+  <section class="card" style="margin-top:1rem">
+    <div class="card-head"><h2>Archivo de la microSD (/rover.csv)</h2><span class="muted small">Formato del firmware: millis,sensor,"valor"</span></div>
+    <div class="row">
+      <div class="field" style="flex:3"><label>Selecciona el archivo copiado de la tarjeta</label><input type="file" id="sdFile" accept=".csv,.txt,text/csv"></div>
+      <button class="btn primary" id="sdImport" disabled>Importar a la base de datos</button>
+    </div>
+    <div id="sdSummary" class="small muted" style="margin:.6rem 0"></div>
+    <div id="sdView" class="hidden">
+      <div class="grid g2">
+        <div><div id="sdMap" class="map"></div></div>
+        <div class="grid">
+          <div class="chart-box" style="height:200px"><canvas id="sdEnv"></canvas></div>
+          <div class="chart-box" style="height:200px"><canvas id="sdDist"></canvas></div>
+        </div>
+      </div>
+      <h3 style="margin-top:1rem">Apartados del archivo</h3>
+      <div class="row" style="margin-bottom:.5rem">
+        <div class="field" style="flex:0 0 220px"><label>Sensor</label><select id="sdSensor"></select></div>
+        <span class="muted small" id="sdSensorInfo"></span>
+      </div>
+      <div class="table-wrap" style="max-height:320px;overflow:auto">
+        <table><thead><tr><th>Línea</th><th>Arranque</th><th>millis</th><th>Fecha/hora (RTC)</th><th>Valor</th></tr></thead><tbody id="sdRows"></tbody></table>
+      </div>
+    </div>
+    <h3 style="margin-top:1.2rem">Archivos importados</h3>
+    <div class="table-wrap"><table><thead><tr><th>Archivo</th><th>Filas</th><th>Puntos GPS</th><th>Arranques</th><th>Fecha RTC</th><th>Importado</th><th></th></tr></thead><tbody id="uploadsBody"></tbody></table></div>
+  </section>
+</main>
+
+<!-- Modal crear / editar -->
+<div class="modal-bg hidden" id="modal">
+  <form class="modal" id="recForm">
+    <h2 id="modalTitle">Registro</h2>
+    <div class="row">
+      <div class="field"><label>Sensor</label><input name="sensor" required pattern="[A-Za-z0-9_]{1,24}"></div>
+      <div class="field"><label>Apartado</label><select name="category"><option value="telemetria">telemetria</option><option value="evento">evento</option><option value="respuesta">respuesta</option><option value="estado">estado</option><option value="comando">comando</option></select></div>
+      <div class="field"><label>Fecha / hora</label><input type="datetime-local" step="1" name="ts"></div>
+    </div>
+    <div class="row" style="margin-top:.6rem">
+      <div class="field"><label>Latitud</label><input name="lat" type="number" step="any"></div>
+      <div class="field"><label>Longitud</label><input name="lon" type="number" step="any"></div>
+    </div>
+    <div class="field" style="margin-top:.6rem"><label>Mensaje (raw)</label><input name="raw" maxlength="500"></div>
+    <div class="field"><label>Datos (JSON)</label><textarea name="data">{}</textarea></div>
+    <div class="field"><label>Notas</label><input name="notes" maxlength="500"></div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button type="button" class="btn" id="cancelModal">Cancelar</button>
+      <button class="btn primary">Guardar</button>
+    </div>
+  </form>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/vendor/mqtt/mqtt.min.js"></script>
+<script src="/js/roverlib.js"></script>
+<script src="/js/common.js"></script>
+<script>
+(async () => {
+  const user = await App.init('/datos.html');
+  const isAdmin = user.role === 'admin';
+  new App.RoverLink().connect();
+
+  const form = document.getElementById('filters');
+  let page = 1, pages = 1, currentItems = [];
+
+  function filterParams() {
+    const fd = new FormData(form), p = new URLSearchParams();
+    for (const [k, v] of fd.entries()) {
+      if (!v) continue;
+      if (k === 'from' || k === 'to') p.set(k, new Date(v).toISOString());
+      else if (k === 'radius') { if (fd.get('near')) p.set(k, v); }
+      else p.set(k, v);
+    }
+    return p;
+  }
+
+  function updateExports() {
+    const p = filterParams();
+    ['csv', 'json', 'kml'].forEach(f => {
+      const q = new URLSearchParams(p); q.set('format', f);
+      document.getElementById(`exp${f[0].toUpperCase()}${f.slice(1)}`).href = `/api/records/export?${q}`;
+    });
+  }
+
+  // ---------- Tabla ----------
+  const locText = r => r.location ? `${r.location.coordinates[1].toFixed(6)}, ${r.location.coordinates[0].toFixed(6)}` : '—';
+  async function loadTable() {
+    const p = filterParams(); p.set('page', page); p.set('limit', pageSize.value);
+    try {
+      const res = await App.api(`/api/records?${p}`);
+      currentItems = res.items; pages = res.pages;
+      countInfo.textContent = `${res.total.toLocaleString('es-MX')} registros`;
+      pageInfo.textContent = `Página ${res.page} de ${res.pages}`;
+      prev.disabled = page <= 1; next.disabled = page >= pages;
+      tbody.innerHTML = res.items.length ? res.items.map((r, i) => `
+        <tr>
+          <td class="small">${r.ts ? App.fmtDate(r.ts) : `<span class="muted">millis ${r.millis ?? '—'}</span>`}</td>
+          <td class="mono">${App.esc(r.sensor)}</td>
+          <td><span class="pill ${r.category}">${r.category}</span></td>
+          <td class="small">${r.source}</td>
+          <td class="raw">${App.esc(r.raw)}${r.notes ? `<div class="muted small">📝 ${App.esc(r.notes)}</div>` : ''}</td>
+          <td class="mono small">${locText(r)}</td>
+          <td style="white-space:nowrap">
+            <button class="btn sm" data-view="${i}">Ver</button>
+            ${isAdmin ? `<button class="btn sm" data-edit="${i}">Editar</button><button class="btn sm danger" data-del="${r._id}">✕</button>` : ''}
+          </td>
+        </tr>`).join('') : '<tr><td colspan="7" class="muted">Sin registros con estos filtros.</td></tr>';
+      tbody.querySelectorAll('[data-view]').forEach(b => b.onclick = () => openModal(currentItems[b.dataset.view], true));
+      tbody.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openModal(currentItems[b.dataset.edit], false));
+      tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+        if (!confirm('¿Eliminar este registro?')) return;
+        try { await App.api(`/api/records/${b.dataset.del}`, { method: 'DELETE' }); App.toast('Registro eliminado'); loadTable(); }
+        catch (e) { App.toast(e.message, 'error'); }
+      });
+    } catch (e) { tbody.innerHTML = `<tr><td colspan="7" style="color:var(--danger)">${App.esc(e.message)}</td></tr>`; }
+  }
+  prev.onclick = () => { if (page > 1) { page--; loadTable(); } };
+  next.onclick = () => { if (page < pages) { page++; loadTable(); } };
+  pageSize.onchange = () => { page = 1; loadTable(); };
+
+  // ---------- Modal CRUD ----------
+  let editingId = null;
+  const toLocalInput = d => { if (!d) return ''; const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 19); };
+  function openModal(r, readOnly) {
+    editingId = r ? r._id : null;
+    modalTitle.textContent = readOnly ? 'Detalle del registro' : (r ? 'Editar registro' : 'Nuevo registro');
+    const f = recForm.elements;
+    f.sensor.value = r ? r.sensor : '';
+    f.category.value = r ? r.category : 'telemetria';
+    f.ts.value = r ? toLocalInput(r.ts) : toLocalInput(new Date());
+    f.lat.value = r && r.location ? r.location.coordinates[1] : '';
+    f.lon.value = r && r.location ? r.location.coordinates[0] : '';
+    f.raw.value = r ? r.raw : '';
+    f.data.value = JSON.stringify(r ? r.data : {}, null, 2);
+    f.notes.value = r ? r.notes || '' : '';
+    [...f].forEach(el => { if (el.name) el.disabled = readOnly; });
+    recForm.querySelector('button.primary').classList.toggle('hidden', readOnly);
+    modal.classList.remove('hidden');
+  }
+  cancelModal.onclick = () => modal.classList.add('hidden');
+  modal.onclick = e => { if (e.target === modal) modal.classList.add('hidden'); };
+  newBtn.onclick = () => openModal(null, false);
+  recForm.onsubmit = async e => {
+    e.preventDefault();
+    const f = recForm.elements;
+    let data;
+    try { data = JSON.parse(f.data.value || '{}'); } catch { return App.toast('El campo Datos no es JSON válido', 'error'); }
+    const body = { sensor: f.sensor.value, category: f.category.value, raw: f.raw.value, notes: f.notes.value, data,
+      ts: f.ts.value ? new Date(f.ts.value).toISOString() : null, lat: f.lat.value, lon: f.lon.value };
+    if (f.lat.value === '' || f.lon.value === '') { body.lat = ''; body.lon = ''; }
+    try {
+      await App.api(editingId ? `/api/records/${editingId}` : '/api/records', { method: editingId ? 'PATCH' : 'POST', body });
+      modal.classList.add('hidden'); App.toast('Guardado'); loadTable();
+    } catch (err) { App.toast(err.message, 'error'); }
+  };
+
+  // ---------- Gráficas y mapa ----------
+  const envChart = App.lineChart(document.getElementById('envChart'), [
+    { label: 'Temperatura (°C)', data: [], borderColor: '#f5a524', yAxisID: 'y' },
+    { label: 'Presión (hPa)', data: [], borderColor: '#2fd3b4', yAxisID: 'y2' }
+  ], { yTitle: '°C', y2Title: 'hPa' });
+  const distChart = App.lineChart(document.getElementById('distChart'), [
+    { label: 'Distancia acumulada (m)', data: [], borderColor: '#5aa9ff' }
+  ], { yTitle: 'm' });
+  const trailMap = App.createMap('trailMap');
+  const trailLayer = L.layerGroup().addTo(trailMap);
+
+  function distanceSeries(points, timeOf) {
+    let acc = 0; const out = [];
+    points.forEach((pt, i) => {
+      if (i) acc += RoverLib.distanceM(points[i - 1].lat, points[i - 1].lon, pt.lat, pt.lon);
+      const t = timeOf(pt); if (t !== null) out.push({ x: t, y: acc });
+    });
+    return { out, total: acc };
+  }
+
+  async function loadCharts() {
+    const p = filterParams();
+    ['sensor', 'category', 'q'].forEach(k => p.delete(k));
+    try {
+      const [series, trail] = await Promise.all([
+        App.api(`/api/records/series?${p}`), App.api(`/api/records/trail?${p}`)
+      ]);
+      envChart.data.datasets[0].data = series.filter(r => typeof r.data.T === 'number').map(r => ({ x: new Date(r.ts).getTime(), y: r.data.T }));
+      envChart.data.datasets[1].data = series.filter(r => typeof r.data.P === 'number').map(r => ({ x: new Date(r.ts).getTime(), y: r.data.P }));
+      envChart.update('none');
+
+      trailLayer.clearLayers();
+      const timed = trail.filter(pt => pt.ts);
+      const ds = distanceSeries(timed, pt => new Date(pt.ts).getTime());
+      distChart.data.datasets[0].data = ds.out; distChart.update('none');
+      distInfo.textContent = `${ds.total.toFixed(1)} m en ${timed.length} puntos con fecha`;
+      if (trail.length) {
+        const line = L.polyline(trail.map(pt => [pt.lat, pt.lon]), { color: '#2fd3b4', weight: 3 }).addTo(trailLayer);
+        trail.forEach((pt, i) => L.circleMarker([pt.lat, pt.lon], { radius: 3, color: pt.source === 'microsd' ? '#f5a524' : '#2fd3b4' })
+          .bindPopup(`#${i + 1} · ${pt.sensor} · ${pt.ts ? App.fmtDate(pt.ts) : 'millis ' + pt.millis}<br>${pt.lat.toFixed(6)}, ${pt.lon.toFixed(6)}`).addTo(trailLayer));
+        trailMap.fitBounds(line.getBounds(), { maxZoom: 19, padding: [20, 20] });
+      }
+      trailInfo.textContent = `${trail.length} puntos GPS`;
+    } catch (e) { App.toast(`Gráficas: ${e.message}`, 'error'); }
+  }
+  useCenter.onclick = () => {
+    const c = trailMap.getCenter();
+    form.elements.near.value = `${c.lat.toFixed(6)},${c.lng.toFixed(6)}`;
+    App.toast('Filtro geográfico actualizado: pulsa Aplicar');
+  };
+
+  form.onsubmit = e => { e.preventDefault(); page = 1; updateExports(); loadTable(); loadCharts(); };
+  resetBtn.onclick = () => setTimeout(() => form.onsubmit(new Event('submit')), 0);
+
+  // ---------- microSD: lectura local, gráficas e importación ----------
+  let sdParsed = null, sdMap = null, sdLayer = null, sdEnvChart = null, sdDistChart = null;
+  sdFile.onchange = async () => {
+    const file = sdFile.files[0];
+    sdImport.disabled = !file;
+    if (!file) return;
+    sdParsed = RoverLib.parseMicroSdCsv(await file.text());
+    const rows = sdParsed.rows, gps = rows.filter(r => r.location);
+    sdSummary.innerHTML = `<b>${App.esc(file.name)}</b>: ${rows.length} filas · ${gps.length} posiciones GPS · ${sdParsed.segments} arranque(s) del ESP32 · ` +
+      (sdParsed.hasAbsoluteTime ? 'fecha/hora calculada con las lecturas RTC' : '<span style="color:var(--accent-2)">sin lecturas RTC: el eje de tiempo usa millis()</span>') +
+      (sdParsed.errors.length ? ` · ${sdParsed.errors.length} líneas no válidas` : '');
+    sdView.classList.remove('hidden');
+    renderSd();
+  };
+
+  function renderSd() {
+    const rows = sdParsed.rows;
+    const useTime = sdParsed.hasAbsoluteTime;
+    // Tiempo continuo aunque haya reinicios: con RTC es absoluto; sin RTC, se encadenan los segmentos.
+    const offsets = {}; let base = 0, lastSeg = -1, lastMs = 0;
+    rows.forEach(r => { if (r.segment !== lastSeg) { base += lastMs; offsets[r.segment] = base; lastSeg = r.segment; } lastMs = r.millis; });
+    const xOf = r => useTime ? r.time : (offsets[r.segment] + r.millis) / 1000;
+
+    if (!sdMap) { sdMap = App.createMap('sdMap'); sdLayer = L.layerGroup().addTo(sdMap); }
+    setTimeout(() => sdMap.invalidateSize(), 50);
+    sdLayer.clearLayers();
+    const gps = rows.filter(r => r.location);
+    if (gps.length) {
+      const line = L.polyline(gps.map(r => [r.location.lat, r.location.lon]), { color: '#f5a524', weight: 3 }).addTo(sdLayer);
+      L.circleMarker(line.getLatLngs()[0], { radius: 6, color: '#4ade80' }).bindPopup('Inicio').addTo(sdLayer);
+      L.circleMarker(line.getLatLngs().at(-1), { radius: 6, color: '#ef5b5b' }).bindPopup('Fin').addTo(sdLayer);
+      sdMap.fitBounds(line.getBounds(), { maxZoom: 19, padding: [20, 20] });
+    }
+
+    if (sdEnvChart) sdEnvChart.destroy();
+    if (sdDistChart) sdDistChart.destroy();
+    const env = rows.filter(r => r.sensor === 'ENV' && xOf(r) !== null);
+    sdEnvChart = App.lineChart(document.getElementById('sdEnv'), [
+      { label: 'Temperatura (°C)', data: env.filter(r => typeof r.data.T_C === 'number').map(r => ({ x: xOf(r), y: r.data.T_C })), borderColor: '#f5a524', yAxisID: 'y' },
+      { label: 'Presión (hPa)', data: env.filter(r => typeof r.data.P_HPA === 'number').map(r => ({ x: xOf(r), y: r.data.P_HPA })), borderColor: '#2fd3b4', yAxisID: 'y2' }
+    ], { xIsTime: useTime, y2Title: 'hPa' });
+    const pts = gps.map(r => ({ lat: r.location.lat, lon: r.location.lon, row: r }));
+    const ds = distanceSeries(pts, pt => xOf(pt.row));
+    sdDistChart = App.lineChart(document.getElementById('sdDist'), [
+      { label: `Distancia acumulada (m) — total ${ds.total.toFixed(1)} m`, data: ds.out, borderColor: '#5aa9ff' }
+    ], { xIsTime: useTime });
+
+    const counts = {};
+    rows.forEach(r => (counts[r.sensor] = (counts[r.sensor] || 0) + 1));
+    sdSensor.innerHTML = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([s, n]) => `<option value="${App.esc(s)}">${App.esc(s)} (${n})</option>`).join('');
+    sdSensor.onchange = renderSdRows;
+    renderSdRows();
+  }
+  function renderSdRows() {
+    const list = sdParsed.rows.filter(r => r.sensor === sdSensor.value);
+    sdSensorInfo.textContent = list.length > 500 ? `Mostrando las primeras 500 de ${list.length}` : `${list.length} filas`;
+    sdRows.innerHTML = list.slice(0, 500).map(r => `<tr><td>${r.line}</td><td>${r.segment + 1}</td><td class="mono">${r.millis}</td>
+      <td class="small">${r.time ? App.fmtDate(r.time) : '—'}</td><td class="raw">${App.esc(r.value)}</td></tr>`).join('');
+  }
+
+  sdImport.onclick = async () => {
+    const file = sdFile.files[0]; if (!file) return;
+    const fd = new FormData(); fd.append('file', file);
+    sdImport.disabled = true;
+    try {
+      const up = await App.api('/api/uploads', { method: 'POST', body: fd });
+      App.toast(`Importadas ${up.rows} filas de ${up.filename}`);
+      loadUploads(); loadTable();
+    } catch (e) { App.toast(e.message, 'error'); }
+    sdImport.disabled = false;
+  };
+
+  async function loadUploads() {
+    try {
+      const ups = await App.api('/api/uploads');
+      uploadFilter.innerHTML = '<option value="">Cualquiera</option>' + ups.map(u => `<option value="${u._id}">${App.esc(u.filename)} · ${App.fmtDate(u.createdAt)}</option>`).join('');
+      uploadsBody.innerHTML = ups.length ? ups.map(u => `<tr><td>${App.esc(u.filename)}</td><td>${u.rows}</td><td>${u.gpsPoints}</td><td>${u.segments}</td>
+        <td>${u.hasAbsoluteTime ? 'Sí' : 'No'}</td><td class="small">${App.fmtDate(u.createdAt)} · ${App.esc(u.uploadedBy || '')}</td>
+        <td style="white-space:nowrap"><button class="btn sm" data-show="${u._id}">Ver en mapa</button>
+        ${isAdmin ? `<button class="btn sm danger" data-delup="${u._id}">Eliminar</button>` : ''}</td></tr>`).join('')
+        : '<tr><td colspan="7" class="muted">Aún no se importa ningún archivo.</td></tr>';
+      uploadsBody.querySelectorAll('[data-show]').forEach(b => b.onclick = () => {
+        form.reset(); form.elements.uploadId.value = b.dataset.show; form.onsubmit(new Event('submit'));
+        trailMap.getContainer().scrollIntoView({ behavior: 'smooth' });
+      });
+      uploadsBody.querySelectorAll('[data-delup]').forEach(b => b.onclick = async () => {
+        if (!confirm('¿Eliminar el archivo y todos sus registros importados?')) return;
+        try { const r = await App.api(`/api/uploads/${b.dataset.delup}`, { method: 'DELETE' }); App.toast(`${r.deletedRecords} registros eliminados`); loadUploads(); loadTable(); }
+        catch (e) { App.toast(e.message, 'error'); }
+      });
+    } catch (e) { App.toast(e.message, 'error'); }
+  }
+
+  updateExports(); loadTable(); loadCharts(); loadUploads();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "rover-web",
+  "version": "1.0.0",
+  "description": "Entorno inteligente para el rover ESP32 (Carrito_ESP32): API RESTful, middleware MQTT-MongoDB y sitio web de monitoreo y gestión.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "bridge": "node src/bridge-standalone.js",
+    "simulador": "node tools/simulador.js",
+    "test": "node tools/tests.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.0",
+    "mqtt": "^5.10.0",
+    "multer": "^2.0.0"
+  }
+}

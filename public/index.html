@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inicio · Estación Geoespacial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="eyebrow">Práctica II · Folio 8 · Entornos Inteligentes y Tecnologías Disruptivas</div>
+    <h1>Entorno operativo para vehículos exploradores inteligentes con transmisión de datos en tiempo real</h1>
+    <p>Rover ESP32 con GPS, sensores ambientales, radar ultrasónico, seguidor de línea y datalogger en microSD.
+      Se comunica por LoRa 433 MHz (tramas autenticadas con HMAC-SHA256) con un gateway que publica en MQTT por red celular.
+      Este sitio almacena los registros en MongoDB y permite monitorear y controlar el vehículo.</p>
+    <div class="btn-group" style="margin-top:1rem">
+      <a class="btn primary" href="/monitoreo.html">Ver monitoreo en vivo</a>
+      <a class="btn" href="/gestion.html">Controlar el rover</a>
+    </div>
+  </section>
+
+  <section class="grid g4" style="margin-top:1rem">
+    <div class="card kpi"><span class="label">Registros en BD</span><span class="value" id="kTotal">—</span><span class="sub" id="kCats"></span></div>
+    <div class="card kpi"><span class="label">Último mensaje del rover</span><span class="value" style="font-size:1.05rem" id="kLast">—</span><span class="sub">vía LoRa → gateway → MQTT</span></div>
+    <div class="card kpi"><span class="label">Último ambiente</span><span class="value" id="kEnv">—</span><span class="sub" id="kEnvSub"></span></div>
+    <div class="card kpi"><span class="label">Última posición</span><span class="value" style="font-size:1.05rem" id="kGps">—</span><span class="sub" id="kGpsSub"></span></div>
+  </section>
+
+  <section class="grid g4" style="margin-top:1rem">
+    <a class="card feature" href="/datos.html"><div class="ico">🗄️</div><h2>Base de datos</h2><p class="muted small">CRUD de registros, filtros temporales y geográficos, gráficas, exportación CSV/JSON/KML e importación del archivo de la microSD.</p></a>
+    <a class="card feature" href="/monitoreo.html"><div class="ico">📡</div><h2>Monitoreo</h2><p class="muted small">Temperatura, humedad y presión en tiempo real, posición del rover en el mapa y bitácora de eventos.</p></a>
+    <a class="card feature" href="/gestion.html"><div class="ico">🕹️</div><h2>Gestión</h2><p class="muted small">Control manual con botones direccionales y control automático eligiendo el destino en un mapa interactivo.</p></a>
+    <div class="card"><div class="ico">👥</div><h2 id="teamName">Equipo</h2><ul id="team" class="small" style="padding-left:1.1rem;margin:.25rem 0"></ul><p class="muted small" id="teacher"></p></div>
+  </section>
+
+  <section class="card diagram" style="margin-top:1rem">
+    <div class="card-head"><h2>Arquitectura del entorno inteligente</h2><span class="muted small">Flujo de datos y comandos</span></div>
+    <svg viewBox="0 0 1100 300" role="img" aria-label="Diagrama de bloques">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8ea2b5"/></marker>
+      </defs>
+      <style>
+        .bx{fill:#182533;stroke:#2fd3b4;stroke-width:1.5;rx:12}
+        .bx2{fill:#182533;stroke:#f5a524;stroke-width:1.5}
+        .tt{fill:#e3ebf2;font:600 15px 'IBM Plex Sans',sans-serif}
+        .st{fill:#8ea2b5;font:12px 'IBM Plex Sans',sans-serif}
+        .lk{stroke:#8ea2b5;stroke-width:1.6;fill:none;marker-end:url(#ar)}
+        .lb{fill:#2fd3b4;font:12px 'JetBrains Mono',monospace}
+      </style>
+      <rect class="bx" x="10" y="40" width="200" height="220" rx="12"/>
+      <text class="tt" x="30" y="70">Robot (ESP32)</text>
+      <text class="st" x="30" y="95">GPS NEO-6M · AHT20+BMP280</text>
+      <text class="st" x="30" y="115">HC-SR04 + servo (radar)</text>
+      <text class="st" x="30" y="135">3 sensores IR (línea)</text>
+      <text class="st" x="30" y="155">PCA9685 → drivers → 4 motores</text>
+      <text class="st" x="30" y="175">RTC DS3231 · microSD</text>
+      <text class="st" x="30" y="195">Pantalla GC9A01A · buzzer</text>
+      <text class="st" x="30" y="215">SX1278 433 MHz</text>
+
+      <rect class="bx" x="300" y="80" width="180" height="140" rx="12"/>
+      <text class="tt" x="320" y="110">Gateway (ESP32)</text>
+      <text class="st" x="320" y="135">SX1278 + SIM800L 2G</text>
+      <text class="st" x="320" y="155">Verifica / firma HMAC</text>
+      <text class="st" x="320" y="175">Carga solar 18650</text>
+
+      <rect class="bx2" x="570" y="100" width="150" height="100" rx="12"/>
+      <text class="tt" x="590" y="135">Broker MQTT</text>
+      <text class="st" x="590" y="160">TCP + WebSockets</text>
+
+      <rect class="bx" x="810" y="20" width="270" height="120" rx="12"/>
+      <text class="tt" x="830" y="50">Back-end (Node.js)</text>
+      <text class="st" x="830" y="75">Express · API RESTful · JWT</text>
+      <text class="st" x="830" y="95">Middleware MQTT → MongoDB</text>
+      <text class="st" x="830" y="115">Planificador de rutas (AUTO)</text>
+
+      <rect class="bx" x="810" y="170" width="270" height="110" rx="12"/>
+      <text class="tt" x="830" y="200">Front-end (este sitio)</text>
+      <text class="st" x="830" y="225">Leaflet · Chart.js · MQTT.js</text>
+      <text class="st" x="830" y="245">Monitoreo · Gestión · CRUD</text>
+
+      <path class="lk" d="M210 130 H298"/><path class="lk" d="M298 170 H212"/>
+      <text class="lb" x="225" y="120">LoRa</text>
+      <path class="lk" d="M480 130 H568"/><path class="lk" d="M568 170 H482"/>
+      <text class="lb" x="500" y="120">2G</text>
+      <path class="lk" d="M720 130 L808 90"/><path class="lk" d="M808 110 L722 145"/>
+      <path class="lk" d="M720 175 L808 215"/><path class="lk" d="M808 235 L722 190"/>
+      <text class="lb" x="735" y="232">WSS</text>
+      <path class="lk" d="M945 140 V168"/>
+      <text class="lb" x="955" y="160">REST</text>
+    </svg>
+  </section>
+</main>
+<script src="/vendor/mqtt/mqtt.min.js"></script>
+<script src="/js/roverlib.js"></script>
+<script src="/js/common.js"></script>
+<script>
+  /* ---- Datos del equipo: EDITAR con los integrantes reales ---- */
+  const TEAM = {
+    name: 'Nombre del equipo',
+    members: [
+      { nombre: 'Integrante 1', rol: 'Rol' },
+      { nombre: 'Integrante 2', rol: 'Rol' }
+    ],
+    teacher: 'Castellanos Berján Esli'
+  };
+
+  (async () => {
+    await App.init('/index.html');
+    document.getElementById('teamName').textContent = TEAM.name;
+    document.getElementById('team').innerHTML = TEAM.members.map(m => `<li>${App.esc(m.nombre)} — <span class="muted">${App.esc(m.rol)}</span></li>`).join('');
+    document.getElementById('teacher').textContent = `Docente: ${TEAM.teacher}`;
+    try {
+      const s = await App.api('/api/records/stats');
+      kTotal.textContent = s.total.toLocaleString('es-MX');
+      kCats.textContent = s.byCategory.map(c => `${c._id}: ${c.n}`).join(' · ');
+      kLast.textContent = App.fmtDate(s.lastRoverMessageAt);
+      if (s.lastEnv) {
+        const d = s.lastEnv.data;
+        kEnv.innerHTML = `${App.fmtNum(d.T)}<small>°C</small>`;
+        kEnvSub.textContent = `${App.fmtNum(d.H)} % · ${App.fmtNum(d.P)} hPa · ${App.fmtDate(s.lastEnv.ts)}`;
+      }
+      if (s.lastGps) {
+        const [lon, lat] = s.lastGps.location.coordinates;
+        kGps.textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+        kGpsSub.textContent = `${s.lastGps.sensor} · ${App.fmtDate(s.lastGps.ts)}`;
+      }
+    } catch (e) { App.toast(e.message, 'error'); }
+    new App.RoverLink().connect();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "info": {
+    "name": "Rover - Estación Geoespacial",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Inicia sesión primero: Postman guarda la cookie rover_token automáticamente."
+  },
+  "variable": [{ "key": "base", "value": "http://localhost:3000" }],
+  "item": [
+    { "name": "Login", "request": { "method": "POST", "url": "{{base}}/api/auth/login",
+      "header": [{ "key": "Content-Type", "value": "application/json" }],
+      "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@rover.local\",\n  \"password\": \"CambiaEstaClave123\"\n}" } } },
+    { "name": "Registro (Usuario)", "request": { "method": "POST", "url": "{{base}}/api/auth/register",
+      "header": [{ "key": "Content-Type", "value": "application/json" }],
+      "body": { "mode": "raw", "raw": "{\n  \"name\": \"Prueba\",\n  \"email\": \"prueba@ucol.mx\",\n  \"password\": \"12345678\"\n}" } } },
+    { "name": "Yo", "request": { "method": "GET", "url": "{{base}}/api/auth/me" } },
+    { "name": "Registros ENV de hoy", "request": { "method": "GET", "url": "{{base}}/api/records?sensor=ENV&from=2026-10-29T00:00:00-06:00&limit=50" } },
+    { "name": "Registros a 30 m de un punto", "request": { "method": "GET", "url": "{{base}}/api/records?near=19.2433,-103.7250&radius=30" } },
+    { "name": "Crear registro (Admin)", "request": { "method": "POST", "url": "{{base}}/api/records",
+      "header": [{ "key": "Content-Type", "value": "application/json" }],
+      "body": { "mode": "raw", "raw": "{\n  \"sensor\": \"ENV\",\n  \"category\": \"telemetria\",\n  \"raw\": \"ENV,T=25.0,H=50.0,P=943.0hPa\",\n  \"data\": { \"T\": 25.0, \"H\": 50.0, \"P\": 943.0 },\n  \"notes\": \"Lectura manual de prueba\"\n}" } } },
+    { "name": "Editar registro (Admin)", "request": { "method": "PATCH", "url": "{{base}}/api/records/:id",
+      "header": [{ "key": "Content-Type", "value": "application/json" }],
+      "body": { "mode": "raw", "raw": "{\n  \"notes\": \"Revisado\"\n}" } } },
+    { "name": "Eliminar registro (Admin)", "request": { "method": "DELETE", "url": "{{base}}/api/records/:id" } },
+    { "name": "Exportar CSV", "request": { "method": "GET", "url": "{{base}}/api/records/export?format=csv" } },
+    { "name": "Exportar KML (Google Earth)", "request": { "method": "GET", "url": "{{base}}/api/records/export?format=kml" } },
+    { "name": "Enviar comando", "request": { "method": "POST", "url": "{{base}}/api/commands",
+      "header": [{ "key": "Content-Type", "value": "application/json" }],
+      "body": { "mode": "raw", "raw": "{\n  \"command\": \"ENV\"\n}" } } },
+    { "name": "Estado del sistema", "request": { "method": "GET", "url": "{{base}}/api/status" } }
+  ]
+}

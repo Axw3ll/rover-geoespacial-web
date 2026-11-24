@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceso · Estación Geoespacial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="card auth-card">
+      <div style="text-align:center;margin-bottom:1rem">
+        <svg viewBox="0 0 32 32" width="54" height="54" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="none" stroke="#2fd3b4" stroke-width="2"/><path d="M16 16 L27 9" stroke="#2fd3b4" stroke-width="2"/><circle cx="16" cy="16" r="7" fill="none" stroke="#2fd3b4" stroke-opacity=".45"/><circle cx="22" cy="12" r="2.2" fill="#f5a524"/></svg>
+        <h1 style="font-size:1.35rem;margin-top:.5rem">Estación Geoespacial de Reconocimiento</h1>
+        <p class="muted small">Universidad de Colima · Facultad de Telemática</p>
+      </div>
+      <div class="tabs">
+        <button class="active" data-tab="login">Iniciar sesión</button>
+        <button data-tab="register">Registrarse</button>
+      </div>
+      <form id="loginForm">
+        <div class="field"><label for="le">Correo</label><input id="le" type="email" autocomplete="username" required></div>
+        <div class="field"><label for="lp">Contraseña</label><input id="lp" type="password" autocomplete="current-password" required></div>
+        <button class="btn primary" style="width:100%">Entrar</button>
+      </form>
+      <form id="registerForm" class="hidden">
+        <div class="field"><label for="rn">Nombre</label><input id="rn" required maxlength="80"></div>
+        <div class="field"><label for="re">Correo</label><input id="re" type="email" autocomplete="username" required></div>
+        <div class="field"><label for="rp">Contraseña (mín. 8)</label><input id="rp" type="password" minlength="8" autocomplete="new-password" required></div>
+        <button class="btn primary" style="width:100%">Crear cuenta</button>
+        <p class="muted small">Las cuentas nuevas son de tipo <b>Usuario</b>. Un Administrador puede cambiar el rol.</p>
+      </form>
+      <p id="msg" class="small" style="color:var(--danger);min-height:1.2em"></p>
+    </div>
+  </div>
+<script>
+  const msg = document.getElementById('msg');
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('active', x === b));
+    document.getElementById('loginForm').classList.toggle('hidden', b.dataset.tab !== 'login');
+    document.getElementById('registerForm').classList.toggle('hidden', b.dataset.tab !== 'register');
+    msg.textContent = '';
+  });
+  async function post(url, body) {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Error');
+    return data;
+  }
+  document.getElementById('loginForm').onsubmit = async e => {
+    e.preventDefault(); msg.textContent = '';
+    try { await post('/api/auth/login', { email: le.value, password: lp.value }); location.href = '/index.html'; }
+    catch (err) { msg.textContent = err.message; }
+  };
+  document.getElementById('registerForm').onsubmit = async e => {
+    e.preventDefault(); msg.textContent = '';
+    try { await post('/api/auth/register', { name: rn.value, email: re.value, password: rp.value }); location.href = '/index.html'; }
+    catch (err) { msg.textContent = err.message; }
+  };
+</script>
+</body>
+</html>

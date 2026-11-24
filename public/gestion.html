@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestión · Estación Geoespacial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<main>
+  <div class="page-title">
+    <div><h1>Gestión del rover</h1><p class="muted small" style="margin:0">Las órdenes viajan por MQTT sobre WebSockets → backend (valida rol) → gateway (firma HMAC) → LoRa.</p></div>
+    <button class="btn danger solid" id="bigStop">■ ALTO TOTAL (STOP)</button>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button data-tab="manual" class="active">Manual</button>
+    <button data-tab="auto">Automático</button>
+    <button data-tab="line">Seguidor de línea</button>
+    <button data-tab="config" data-admin>Configuración</button>
+    <button data-tab="users" data-admin>Usuarios</button>
+  </div>
+
+  <div class="grid g3">
+    <div class="span2">
+      <!-- ================= MANUAL ================= -->
+      <section data-pane="manual" class="card">
+        <div class="card-head"><h2>Control manual</h2><span class="badge" id="manualProfile">Perfil manual: consultando…</span></div>
+        <div class="grid g2">
+          <div>
+            <div class="dpad" id="dpad">
+              <span></span><button class="btn" data-dir="fwd" aria-label="Adelante">▲</button><span></span>
+              <button class="btn" data-dir="left" aria-label="Izquierda">◀</button>
+              <button class="btn stop" id="dpadStop">STOP</button>
+              <button class="btn" data-dir="right" aria-label="Derecha">▶</button>
+              <span></span><button class="btn" data-dir="back" aria-label="Atrás">▼</button><span></span>
+            </div>
+            <p class="muted small" style="text-align:center">Mantén presionado (o usa ↑ ↓ ← → / W A S D; espacio = STOP).<br>Cada orden concede 700 ms de movimiento en el firmware; se repite mientras sostienes el botón.</p>
+          </div>
+          <div>
+            <div class="field"><label>Repetición mientras se sostiene: <b id="intLbl">500</b> ms</label><input type="range" id="interval" min="350" max="650" step="50" value="500"></div>
+            <div class="field"><label>PWM de giro sobre el eje (DRIVE): <b id="turnLbl">60</b> %</label><input type="range" id="turnPwm" min="30" max="100" step="5" value="60"></div>
+            <h3 style="margin-top:1rem">Maniobras precisas (perfiles calibrados)</h3>
+            <div class="btn-group" style="margin-bottom:.5rem">
+              <button class="btn sm" data-cmd="TURN PIVOT LEFT 45">↺ 45°</button>
+              <button class="btn sm" data-cmd="TURN PIVOT LEFT 90">↺ 90°</button>
+              <button class="btn sm" data-cmd="TURN PIVOT RIGHT 90">↻ 90°</button>
+              <button class="btn sm" data-cmd="TURN PIVOT RIGHT 45">↻ 45°</button>
+              <button class="btn sm" data-cmd="TURN PIVOT RIGHT 180">180°</button>
+            </div>
+            <div class="row">
+              <div class="field"><label>Avanzar / retroceder (s)</label><input type="number" id="secs" min="0.2" max="30" step="0.1" value="1"></div>
+              <button class="btn" id="fwdSec">Adelante</button><button class="btn" id="backSec">Atrás</button>
+            </div>
+            <div class="btn-group" style="margin-top:.75rem">
+              <button class="btn sm" data-cmd="BEEP">🔔 Bocina</button>
+              <button class="btn sm" data-cmd="MANUAL SHOW">Perfil manual</button>
+              <button class="btn sm" data-cmd="TURN SHOW">Perfiles de giro</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= AUTOMÁTICO ================= -->
+      <section data-pane="auto" class="card hidden">
+        <div class="card-head">
+          <h2>Control automático</h2>
+          <span class="muted small">Haz clic en el mapa para elegir el destino</span>
+        </div>
+        <div id="autoMap" class="map tall"></div>
+        <div class="row" style="margin-top:.75rem">
+          <div class="field"><label>Latitud destino</label><input id="tLat" type="number" step="0.000001"></div>
+          <div class="field"><label>Longitud destino</label><input id="tLon" type="number" step="0.000001"></div>
+          <button class="btn primary" id="goBtn">Enviar destino e iniciar</button>
+          <button class="btn danger" data-cmd="AUTO OFF">Detener AUTO</button>
+          <button class="btn" data-cmd="AUTO RESET">AUTO RESET</button>
+          <button class="btn" data-cmd="AUTO STATUS">Estado</button>
+        </div>
+        <div class="grid g2" style="margin-top:1rem">
+          <table><tbody>
+            <tr><td class="muted">Planificador</td><td id="pState" class="mono">—</td></tr>
+            <tr><td class="muted">Distancia al destino</td><td id="pDist" class="mono">—</td></tr>
+            <tr><td class="muted">Rumbo estimado / al destino</td><td id="pHead" class="mono">—</td></tr>
+            <tr><td class="muted">Último lote</td><td id="pBatch" class="mono small">—</td></tr>
+          </tbody></table>
+          <div class="small muted" id="pMsg">
+            El rover pide ruta (<code>REQUEST,ROUTE</code>) con su GPS; el backend calcula giros cuantizados (45/90/180° PIVOT)
+            y tramos rectos según su calibración ms/metro, y responde <code>ROUTE BATCH</code>. El rover evita obstáculos por sí mismo
+            con el HC-SR04 y vuelve a pedir ruta. Requiere fix GPS y perfiles <code>TURNSET</code>/<code>DRIVESET</code> configurados.
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SEGUIDOR DE LÍNEA ================= -->
+      <section data-pane="line" class="card hidden">
+        <div class="card-head"><h2>Seguidor de línea</h2><span class="badge" id="lineState">Estado: —</span></div>
+        <div class="btn-group">
+          <button class="btn primary" data-cmd="LINE FOLLOW ON">Iniciar</button>
+          <button class="btn danger" data-cmd="LINE FOLLOW OFF">Detener</button>
+          <button class="btn" data-cmd="LINE FOLLOW STATUS">Estado</button>
+          <button class="btn" data-cmd="IR">Leer sensores IR</button>
+          <button class="btn" data-cmd="LINESET SHOW">Ver calibración</button>
+        </div>
+        <div class="grid g3" style="margin-top:1rem">
+          <div class="card kpi"><span class="label">IR izquierdo</span><span class="value" id="irL">—</span></div>
+          <div class="card kpi"><span class="label">IR centro</span><span class="value" id="irC">—</span></div>
+          <div class="card kpi"><span class="label">IR derecho</span><span class="value" id="irR">—</span></div>
+        </div>
+        <p class="muted small">Al perder la línea el firmware se detiene y exige una nueva orden <code>LINE FOLLOW ON</code>.
+          La calibración (<code>LINESET PWM / SOFT PWM / TURN PWM / CORRECTION / ACTIVE / METER MS</code>) se hace desde Configuración.</p>
+      </section>
+
+      <!-- ================= CONFIGURACIÓN (ADMIN) ================= -->
+      <section data-pane="config" class="card hidden" data-admin>
+        <div class="card-head"><h2>Terminal y configuración</h2><span class="badge admin">Administrador</span></div>
+        <form class="row" id="termForm">
+          <div class="field" style="flex:5"><label>Comando libre (máx. 150 caracteres)</label><input id="termInput" maxlength="150" placeholder="ej. TURNSET P_R90 60 450 -60 450 60 450 -60 450" autocomplete="off"></div>
+          <button class="btn primary">Enviar</button>
+        </form>
+        <div class="btn-group" style="margin:.9rem 0">
+          <button class="btn sm" id="rtcSync">Sincronizar RTC con esta PC</button>
+          <button class="btn sm" data-cmd="GPS CONF">GPS: detectar baudios</button>
+          <button class="btn sm" data-cmd="MICROSD 1">microSD: grabar</button>
+          <button class="btn sm" data-cmd="MICROSD 0">microSD: detener</button>
+          <button class="btn sm" data-cmd="MICROSD STATUS">microSD: estado</button>
+          <button class="btn sm" data-cmd="RADAR TEST">Barrido de radar</button>
+          <button class="btn sm" data-cmd="RADAR TEST 0">Detener radar</button>
+          <button class="btn sm" data-cmd="DRIVE SHOW">Perfiles AUTO</button>
+          <button class="btn sm" data-cmd="LORA AUTH STATUS">Contadores LoRa</button>
+          <button class="btn sm" data-cmd="HELP">HELP</button>
+        </div>
+        <details>
+          <summary class="muted" style="cursor:pointer">Referencia de calibración (sintaxis del firmware)</summary>
+          <pre class="log" style="height:auto">MANUALSET FWD|REV fl fr rl rr              PWM firmado -100..100 para FWD/BACK manual
+DRIVESET FWD|REV fl fr rl rr msPorMetro     Perfil AUTO (requerido por el planificador)
+TURNSET P_R90 pwm ms pwm ms pwm ms pwm ms    Perfiles: P_/N_ + R/L + 45|90|180 (orden FL FR RL RR)
+LINESET PWM fl fr rl rr | LINESET SOFT PWM ... | LINESET TURN PWM ...
+LINESET CORRECTION 0..90 | LINESET ACTIVE 0|1 | LINESET METER MS 0..30000
+POLL ENV|GPS|IR|RTC segundos (0 = apagar / lectura única)
+POLL RADAR segundos angulo | RADAR TEST [segundos]
+GPS BAUD 9600 | GPS DEBUG ON|OFF | RTC SET AAAA MM DD HH MM SS
+MOTOR FL|FR|RL|RR pwm ms | MOTORS pwm ms pwm ms pwm ms pwm ms</pre>
+        </details>
+      </section>
+
+      <!-- ================= USUARIOS (ADMIN) ================= -->
+      <section data-pane="users" class="card hidden" data-admin>
+        <div class="card-head"><h2>Cuentas</h2><span class="muted small">Administrador: calibración, sondeos, terminal y CRUD · Usuario: monitoreo, control manual/automático y consultas</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Alta</th><th></th></tr></thead><tbody id="usersBody"></tbody></table></div>
+      </section>
+    </div>
+
+    <div class="card" style="align-self:start">
+      <div class="card-head"><h2>Respuestas del rover</h2><button class="btn sm" id="clearLog">Limpiar</button></div>
+      <div id="log" class="log" style="height:560px"></div>
+    </div>
+  </div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/vendor/mqtt/mqtt.min.js"></script>
+<script src="/js/roverlib.js"></script>
+<script src="/js/common.js"></script>
+<script>
+(async () => {
+  const user = await App.init('/gestion.html');
+  const link = await new App.RoverLink().connect();
+
+  // ---------- Bitácora ----------
+  const logEl = document.getElementById('log');
+  function log(text, cls = 'in') {
+    const div = document.createElement('div');
+    div.className = 'l';
+    div.innerHTML = `<span class="t">${App.fmtTime(Date.now())}</span><span class="${cls}">${App.esc(text)}</span>`;
+    logEl.appendChild(div);
+    while (logEl.children.length > 400) logEl.firstChild.remove();
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  clearLog.onclick = () => (logEl.innerHTML = '');
+  let lastSent = '';
+  link.on('sent', cmd => { if (cmd !== lastSent) log(`> ${cmd}`, 'out'); lastSent = cmd; });
+
+  // ---------- Pestañas ----------
+  let autoMapReady = false;
+  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x === b));
+    document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.tab));
+    if (b.dataset.tab === 'auto') { if (!autoMapReady) initAutoMap(); setTimeout(() => autoMap.invalidateSize(), 50); }
+    if (b.dataset.tab === 'users') loadUsers();
+  });
+
+  document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => link.send(b.dataset.cmd));
+  const sendStop = () => link.send('STOP');
+  bigStop.onclick = sendStop;
+
+  // ================= CONTROL MANUAL =================
+  let manualSigns = [1, 1, 1, 1];
+  interval.oninput = () => (intLbl.textContent = interval.value);
+  turnPwm.oninput = () => (turnLbl.textContent = turnPwm.value);
+
+  // DRIVE fl fr rl rr: giro sobre el eje respetando la polaridad del perfil manual
+  function turnCommand(dir) {
+    const p = Number(turnPwm.value);
+    const s = manualSigns;
+    const k = dir === 'left' ? -1 : 1; // izquierda: ruedas izquierdas atrás, derechas adelante
+    return `DRIVE ${k * s[0] * p} ${-k * s[1] * p} ${k * s[2] * p} ${-k * s[3] * p}`;
+  }
+  const dirCommand = dir => dir === 'fwd' ? 'FWD' : dir === 'back' ? 'BACK' : turnCommand(dir);
+
+  let holdTimer = null, holdDir = null;
+  function startHold(dir) {
+    if (holdDir === dir) return;
+    stopHold(false);
+    holdDir = dir;
+    document.querySelector(`[data-dir="${dir}"]`).classList.add('pressed');
+    link.send(dirCommand(dir));
+    holdTimer = setInterval(() => link.send(dirCommand(dir), { quiet: true }).catch(() => {}), Number(interval.value));
+  }
+  function stopHold(withStop = true) {
+    if (!holdDir) return;
+    clearInterval(holdTimer); holdTimer = null;
+    document.querySelectorAll('[data-dir]').forEach(b => b.classList.remove('pressed'));
+    holdDir = null;
+    if (withStop) sendStop();
+  }
+  document.querySelectorAll('[data-dir]').forEach(b => {
+    b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); startHold(b.dataset.dir); });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => b.addEventListener(ev, () => stopHold(true)));
+  });
+  dpadStop.onclick = () => { stopHold(false); sendStop(); };
+  const KEYS = { ArrowUp: 'fwd', w: 'fwd', W: 'fwd', ArrowDown: 'back', s: 'back', S: 'back', ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right' };
+  const manualVisible = () => !document.querySelector('[data-pane="manual"]').classList.contains('hidden');
+  document.addEventListener('keydown', e => {
+    if (!manualVisible() || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+    if (e.key === ' ') { e.preventDefault(); stopHold(false); sendStop(); return; }
+    if (KEYS[e.key]) { e.preventDefault(); startHold(KEYS[e.key]); }
+  });
+  document.addEventListener('keyup', e => { if (KEYS[e.key] && KEYS[e.key] === holdDir) stopHold(true); });
+  window.addEventListener('blur', () => stopHold(true));
+
+  fwdSec.onclick = () => link.send(`FWD_SEC ${Number(secs.value)}`);
+  backSec.onclick = () => link.send(`BACK_SEC ${Number(secs.value)}`);
+
+  // ================= AUTOMÁTICO =================
+  let autoMap, roverMarker, targetMarker, toTargetLine, autoTrail, roverPos = null;
+  function initAutoMap() {
+    autoMapReady = true;
+    autoMap = App.createMap('autoMap');
+    roverMarker = L.marker(autoMap.getCenter(), { icon: App.roverIcon() });
+    targetMarker = L.marker(autoMap.getCenter(), { icon: App.targetIcon(), draggable: true });
+    toTargetLine = L.polyline([], { color: '#f5a524', dashArray: '6 8', weight: 2 }).addTo(autoMap);
+    autoTrail = L.polyline([], { color: '#2fd3b4', weight: 3 }).addTo(autoMap);
+    autoMap.on('click', e => setTarget(e.latlng.lat, e.latlng.lng));
+    targetMarker.on('drag', e => setTarget(e.latlng.lat, e.latlng.lng, true));
+    if (roverPos) updateRover(roverPos.lat, roverPos.lon, true);
+    App.api('/api/records/trail?limit=1&source=lora').then(pts => {
+      if (pts.length && !roverPos) updateRover(pts[0].lat, pts[0].lon, true);
+    }).catch(() => {});
+  }
+  function setTarget(lat, lon, fromDrag) {
+    tLat.value = lat.toFixed(6); tLon.value = lon.toFixed(6);
+    if (!fromDrag) targetMarker.setLatLng([lat, lon]);
+    targetMarker.addTo(autoMap);
+    drawToTarget();
+  }
+  function drawToTarget() {
+    if (!autoMapReady || !roverPos || !tLat.value) return;
+    const t = [Number(tLat.value), Number(tLon.value)];
+    toTargetLine.setLatLngs([[roverPos.lat, roverPos.lon], t]);
+    const d = RoverLib.distanceM(roverPos.lat, roverPos.lon, t[0], t[1]);
+    pDist.textContent = `${d.toFixed(1)} m (línea recta)`;
+  }
+  function updateRover(lat, lon, center) {
+    roverPos = { lat, lon };
+    if (!autoMapReady) return;
+    roverMarker.setLatLng([lat, lon]).addTo(autoMap);
+    autoTrail.addLatLng([lat, lon]);
+    if (center) autoMap.setView([lat, lon], 19);
+    drawToTarget();
+  }
+  [tLat, tLon].forEach(i => i.onchange = () => {
+    if (tLat.value && tLon.value && autoMapReady) setTarget(Number(tLat.value), Number(tLon.value));
+  });
+  goBtn.onclick = async () => {
+    const lat = Number(tLat.value), lon = Number(tLon.value);
+    if (!tLat.value || !tLon.value || Math.abs(lat) > 90 || Math.abs(lon) > 180) return App.toast('Selecciona un destino válido en el mapa', 'warn');
+    try {
+      await link.send(`AUTO TARGET ${lat.toFixed(6)} ${lon.toFixed(6)}`);
+      await link.send('AUTO ON');
+      App.toast('Destino enviado. El rover pedirá su ruta en cuanto tenga fix GPS.');
+    } catch { /* toast ya mostrado */ }
+  };
+  link.on('planner', s => {
+    pState.textContent = s.state || '—';
+    if (s.distanceM !== undefined) pDist.textContent = `${s.distanceM} m (planificador)`;
+    pHead.textContent = `${s.heading ?? '¿?'}° / ${s.bearingToTarget ?? '—'}°`;
+    if (s.lastBatch) pBatch.textContent = s.lastBatch;
+    if (s.message) log(`[planificador] ${s.message}`, s.state === 'ERROR' || s.state === 'BLOCKED' ? 'err' : 'ok');
+  });
+
+  // ================= MENSAJES DEL ROVER =================
+  link.on('rover', p => {
+    const d = p.data, tags = d.tags || [];
+    log(p.raw, p.sensor === 'ERROR' ? 'err' : (p.sensor === 'OK' || p.sensor === 'EVENT') ? 'ok' : 'in');
+    if (p.location && (p.sensor === 'GPS' || p.sensor === 'REQUEST')) updateRover(p.location.lat, p.location.lon, false);
+    if (p.sensor === 'DRIVE_PROFILE' && tags[0] === 'MANUAL_FWD') {
+      if (tags.includes('NOT_CONFIGURED')) manualProfile.textContent = 'Perfil manual FWD sin configurar (MANUALSET)';
+      else {
+        const pwm = String(d.PWM).split('/').map(Number);
+        manualSigns = pwm.map(v => (v < 0 ? -1 : 1));
+        manualProfile.textContent = `Perfil manual FWD: ${d.PWM}`;
+      }
+    }
+    if (p.sensor === 'IR') { irL.textContent = d.LEFT; irC.textContent = d.CENTER; irR.textContent = d.RIGHT; }
+    if (p.sensor === 'LINE_FOLLOW') {
+      lineState.textContent = `Estado: ${d.STATE || d.MODE || tags.join(' ')}`;
+      if (typeof d.RAW === 'string' || typeof d.RAW === 'number') {
+        const raw = String(d.RAW).replace(/\//g, '');
+        if (raw.length === 3) { irL.textContent = raw[0]; irC.textContent = raw[1]; irR.textContent = raw[2]; }
+      }
+    }
+    if (p.sensor === 'AUTO' && tags[0] === 'STATE') pState.textContent = `rover: ${tags[1]}`;
+  });
+
+  link.on('connect', () => link.send('MANUAL SHOW', { quiet: true }).catch(() => {}));
+
+  // ================= CONFIGURACIÓN (ADMIN) =================
+  termForm.onsubmit = e => {
+    e.preventDefault();
+    const c = termInput.value.trim();
+    if (!c) return;
+    link.send(c).then(() => (termInput.value = '')).catch(() => {});
+  };
+  rtcSync.onclick = () => {
+    const n = new Date(), z = v => String(v).padStart(2, '0');
+    link.send(`RTC SET ${n.getFullYear()} ${z(n.getMonth() + 1)} ${z(n.getDate())} ${z(n.getHours())} ${z(n.getMinutes())} ${z(n.getSeconds())}`);
+  };
+
+  // ================= USUARIOS (ADMIN) =================
+  async function loadUsers() {
+    if (user.role !== 'admin') return;
+    try {
+      const users = await App.api('/api/users');
+      usersBody.innerHTML = users.map(u => `
+        <tr><td>${App.esc(u.name)}</td><td>${App.esc(u.email)}</td>
+        <td><select data-role="${u.id}" style="width:auto">
+          <option value="usuario" ${u.role === 'usuario' ? 'selected' : ''}>Usuario</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrador</option></select></td>
+        <td class="small">${App.fmtDate(u.createdAt)}</td>
+        <td>${u.id === user.id ? '<span class="muted small">tú</span>' : `<button class="btn sm danger" data-del="${u.id}">Eliminar</button>`}</td></tr>`).join('');
+      usersBody.querySelectorAll('[data-role]').forEach(s => s.onchange = async () => {
+        try { await App.api(`/api/users/${s.dataset.role}`, { method: 'PATCH', body: { role: s.value } }); App.toast('Rol actualizado'); }
+        catch (e) { App.toast(e.message, 'error'); loadUsers(); }
+      });
+      usersBody.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+        if (!confirm('¿Eliminar esta cuenta?')) return;
+        try { await App.api(`/api/users/${b.dataset.del}`, { method: 'DELETE' }); loadUsers(); }
+        catch (e) { App.toast(e.message, 'error'); }
+      });
+    } catch (e) { App.toast(e.message, 'error'); }
+  }
+})();
+</script>
+</body>
+</html>
