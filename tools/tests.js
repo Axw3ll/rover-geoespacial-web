@@ -32,6 +32,21 @@ test('RADAR,SCAN con pares ángulo:distancia', () => {
 test('RTC con fecha', () => assert.strictEqual(L.parseRoverMessage('RTC,2026-10-29 11:22:33').data.stamp, '2026-10-29 11:22:33'));
 test('EVENT', () => assert.strictEqual(L.parseRoverMessage('EVENT,BATCH_INTERRUPTED,ID=4,STEP=1/2,REASON=OBSTACLE').data.event, 'BATCH_INTERRUPTED'));
 
+console.log('Mensajes del gateway (tópico rx)');
+test('JSON del gateway con "payload" (formato real GW01)', () => {
+  const r = L.splitGatewayPayload('{"device":"CAR01","seq":4460,"rssi":-83,"snr":3.0,"ms":16221843,"payload":"GPS,LAT=19.319316,LON=-103.767907,AGE_MS=47"}');
+  assert.deepStrictEqual(r.lines, ['GPS,LAT=19.319316,LON=-103.767907,AGE_MS=47']);
+  assert.deepStrictEqual(r.radio, { rssi: -83, snr: 3, seq: 4460 });
+  assert.deepStrictEqual(L.parseRoverMessage(r.lines[0]).location, { lat: 19.319316, lon: -103.767907 });
+});
+test('JSON con "msg" (formato anterior) sigue funcionando', () => {
+  assert.deepStrictEqual(L.splitGatewayPayload('{"msg":"ENV,T=24.1","rssi":-87,"snr":7.5}').lines, ['ENV,T=24.1']);
+});
+test('Texto plano con varias líneas', () => {
+  const r = L.splitGatewayPayload('RTC,2026-11-24 10:15:00\r\nIR,LEFT=1,CENTER=0,RIGHT=1\n');
+  assert.deepStrictEqual([r.lines.length, r.radio], [2, null]);
+});
+
 console.log('Archivo de la microSD');
 test('CSV con reinicio y anclaje RTC', () => {
   const csv = [

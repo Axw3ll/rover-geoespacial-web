@@ -27,7 +27,7 @@ Robot ESP32 ──LoRa 433 MHz (HMAC)──► Gateway ESP32 ──2G──► B
 | Gestión manual (botones / joystick) | `gestion.html` → Manual: cruceta con repetición mientras se sostiene, teclado WASD/flechas, maniobras calibradas. |
 | Gestión automática (destino en mapa + planificación) | `gestion.html` → Automático + `src/planner.js` (responde `REQUEST,ROUTE` con `ROUTE BATCH`). |
 | Back-end: API RESTful + middleware MQTT-MongoDB que corre aunque nadie abra el sitio | `server.js` inicia `src/bridge.js`; también `npm run bridge` lo ejecuta solo. |
-| Control por *websockets* por MQTT | El navegador usa MQTT.js por `wss://`; publica en `<base>/web/cmd` y recibe `<base>/tx`. |
+| Control por *websockets* por MQTT | El navegador usa MQTT.js por `wss://`; publica en `<base>/web/cmd` y recibe `<base>/rx`. |
 
 ## Instalación
 
@@ -59,10 +59,10 @@ usando el mismo prefijo de tópicos.
 - Los brokers públicos (`broker.hivemq.com`, etc.) **sirven solo para pruebas con el simulador**:
   cualquiera que adivine el tópico puede publicar en `<base>/cmd` y el gateway firmaría ese comando.
   Usa un broker con usuario/contraseña (HiveMQ Cloud, EMQX Cloud o Mosquitto propio con TLS) y ACL:
-  - credenciales del **gateway**: publicar `<base>/tx`, `<base>/gateway`; suscribirse a `<base>/cmd`.
+  - credenciales del **gateway**: publicar `<base>/rx`, `<prefijo>/GW01/status`; suscribirse a `<base>/cmd`.
   - credenciales del **backend**: todo `<base>/#`.
   - credenciales del **navegador** (`MQTT_WS_*`, se entregan a usuarios con sesión): suscribirse a
-    `<base>/tx`, `<base>/web/ack`, `<base>/planner`, `<base>/gateway`; publicar solo `<base>/web/cmd`.
+    `<base>/rx`, `<base>/web/ack`, `<base>/planner`, `<prefijo>/GW01/status`; publicar solo `<base>/web/cmd`.
 - El backend valida cada comando del navegador (token firmado + rol) antes de reenviarlo
   (`src/policy.js`). La cuenta **Usuario** puede: control manual, automático, seguidor de línea y
   lecturas. **Administrador** además: calibración (`TURNSET`, `DRIVESET`, `MANUALSET`, `LINESET`),

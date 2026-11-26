@@ -88,7 +88,7 @@
       });
       this.client.on('connect', () => {
         this.setStatus('on', 'MQTT');
-        this.client.subscribe([m.topics.tx, m.topics.webAck, m.topics.planner, m.topics.status]);
+        this.client.subscribe([m.topics.rx, m.topics.webAck, m.topics.planner, m.topics.status]);
         this.emit('connect');
       });
       this.client.on('offline', () => this.setStatus('off', 'Sin MQTT'));
@@ -107,12 +107,9 @@
 
     onMessage(topic, text) {
       const t = this.cfg.mqtt.topics;
-      if (topic === t.tx) {
-        let lines = [text], radio = null;
-        if (text.trim().startsWith('{')) {
-          try { const j = JSON.parse(text); lines = [j.msg || j.raw || j.text || j.message || '']; radio = { rssi: j.rssi, snr: j.snr }; } catch { /* texto */ }
-        }
-        lines.join('\n').split(/\r?\n/).filter(l => l.trim()).forEach(line => {
+      if (topic === t.rx) {
+        const { lines, radio } = RoverLib.splitGatewayPayload(text);
+        lines.forEach(line => {
           const parsed = RoverLib.parseRoverMessage(line);
           parsed.receivedAt = Date.now();
           if (radio) parsed.radio = radio;

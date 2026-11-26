@@ -5,6 +5,7 @@ if (!process.env.TZ) process.env.TZ = 'America/Mexico_City';
 const num = (v, d) => (v === undefined || v === '' || isNaN(Number(v)) ? d : Number(v));
 const prefix = (process.env.MQTT_TOPIC_PREFIX || 'udec/telematica/rover').replace(/\/+$/, '');
 const deviceId = process.env.DEVICE_ID || 'CAR01';
+const gatewayId = process.env.GATEWAY_ID || 'GW01';
 const base = `${prefix}/${deviceId}`;
 
 const config = {
@@ -24,12 +25,14 @@ const config = {
   },
   // Contrato de tópicos con el gateway (ver docs/PROTOCOLO.md)
   topics: {
-    tx: `${base}/tx`,           // gateway -> nube: texto del rover ya verificado (HMAC)
+    // gateway -> nube: mensaje del rover ya verificado (HMAC), p. ej. {"payload":"GPS,...","rssi":-83}
+    rx: process.env.MQTT_TOPIC_RX || `${base}/rx`,
     cmd: `${base}/cmd`,         // nube -> gateway: comando en texto plano (el gateway lo firma)
     webCmd: `${base}/web/cmd`,  // navegador -> backend: {id, command, token}
     webAck: `${base}/web/ack`,  // backend -> navegador: {id, ok, error}
     planner: `${base}/planner`, // backend -> navegador: estado del planificador
-    status: `${base}/gateway`   // gateway -> nube: estado opcional (batería, RSSI, señal 2G)
+    // gateway -> nube: estado del gateway, p. ej. {"type":"connection","online":true,"mode":"SIM"}
+    status: process.env.MQTT_TOPIC_STATUS || `${prefix}/${gatewayId}/status`
   },
   planner: {
     enabled: String(process.env.PLANNER_ENABLED || 'true') !== 'false',

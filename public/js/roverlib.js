@@ -148,6 +148,25 @@
     return { rows, segments: segment + 1, errors, hasAbsoluteTime: rows.some(r => r.time !== null) };
   }
 
+  /**
+   * Separa lo que el gateway publica en el tópico rx en líneas del firmware.
+   * Acepta texto plano (una o varias líneas) o JSON:
+   *   {"device":"CAR01","seq":4460,"rssi":-83,"snr":3.0,"ms":16221843,"payload":"GPS,LAT=..."}
+   * (también {"msg"|"raw"|"text"|"message": "..."}). Devuelve { lines, radio }.
+   */
+  function splitGatewayPayload(text) {
+    const raw = String(text || '').trim();
+    let body = raw, radio = null;
+    if (raw.startsWith('{')) {
+      try {
+        const j = JSON.parse(raw);
+        body = String(j.payload ?? j.msg ?? j.raw ?? j.text ?? j.message ?? '');
+        if (j.rssi !== undefined || j.snr !== undefined || j.seq !== undefined) radio = { rssi: j.rssi, snr: j.snr, seq: j.seq };
+      } catch { /* se trata como texto */ }
+    }
+    return { lines: body.split(/\r?\n/).map(l => l.trim()).filter(Boolean), radio };
+  }
+
   // ---------- Geografía ----------
   const R = 6371008.8; // radio medio terrestre (m)
   const rad = d => d * Math.PI / 180;
@@ -181,6 +200,6 @@
     return total;
   }
 
-  return { parseRoverMessage, parseMicroSdCsv, parseKv, parseRtcStamp, categoryOf,
+  return { parseRoverMessage, splitGatewayPayload, parseMicroSdCsv, parseKv, parseRtcStamp, categoryOf,
            distanceM, bearingDeg, normalize180, pathLengthM };
 });

@@ -1,6 +1,6 @@
 /*
  * Middleware MQTT -> MongoDB (corre siempre, aunque nadie tenga abierto el sitio).
- *  - Guarda cada mensaje del rover que el gateway publica en <base>/tx.
+ *  - Guarda cada mensaje del rover que el gateway publica en <base>/rx.
  *  - Recibe comandos del navegador por MQTT sobre WebSockets (<base>/web/cmd),
  *    valida el token y el rol, los registra y los reenvía al gateway (<base>/cmd).
  *  - Ejecuta el planificador de rutas del modo automático.
@@ -10,7 +10,7 @@ const mongoose = require('mongoose');
 const config = require('./config');
 const Record = require('./models/Record');
 const RoutePlanner = require('./planner');
-const { parseRoverMessage } = require('../public/js/roverlib');
+const { parseRoverMessage, splitGatewayPayload } = require('../public/js/roverlib');
 const { checkCommand } = require('./policy');
 const { verify } = require('./auth');
 
@@ -58,27 +58,12 @@ function dispatchCommand(command, user, origin) {
   return { ok: true, command: check.command };
 }
 
-// Acepta texto plano (una o varias líneas) o JSON {msg|raw|text, rssi, snr}
-function splitPayload(buffer) {
-  const text = buffer.toString('utf8').trim();
-  if (text.startsWith('{')) {
-    try {
-      const j = JSON.parse(text);
-      const msg = j.msg || j.raw || j.text || j.message || '';
-      return String(msg).split(/\r?\n/).map(line => ({ line, radio: { rssi: j.rssi, snr: j.snr } }));
-    } catch { /* se trata como texto */ }
-  }
-  return text.split(/\r?\n/).map(line => ({ line, radio: null }));
-}
-
 function onRoverPayload(buffer) {
   state.lastRoverAt = new Date();
-  for (const { line, radio } of splitPayload(buffer)) {
-    if (!line.trim()) continue;
+  const { lines, radio } = splitGatewayPayload(buffer.toString('utf8'));
+  for (const line of lines) {
     const parsed = parseRoverMessage(line);
-    if (radio && (radio.rssi !== undefined || radio.snr !== undefined)) {
-      parsed.data.rssi = radio.rssi; parsed.data.snr = radio.snr;
-    }
+    if (radio) { parsed.data.rssi = radio.rssi; parsed.data.snr = radio.snr; if (radio.seq !== undefined) parsed.data.seq = radio.seq; }
     save(toRecord(parsed));
     if (planner) planner.onMessage(parsed);
   }
@@ -110,13 +95,13 @@ function start() {
   client.on('connect', () => {
     state.connected = true;
     console.log(`[bridge] MQTT conectado: ${config.mqtt.url}`);
-    client.subscribe([config.topics.tx, config.topics.webCmd, config.topics.status], { qos: 1 });
+    client.subscribe([config.topics.rx, config.topics.webCmd, config.topics.status], { qos: 1 });
   });
   client.on('reconnect', () => console.log('[bridge] Reintentando MQTT...'));
   client.on('close', () => { state.connected = false; });
   client.on('error', e => console.error('[bridge] MQTT:', e.message));
   client.on('message', (topic, payload) => {
-    if (topic === config.topics.tx) onRoverPayload(payload);
+    if (topic === config.topics.rx) onRoverPayload(payload);
     else if (topic === config.topics.webCmd) onWebCommand(payload);
     else if (topic === config.topics.status) {
       try { state.lastGatewayStatus = JSON.parse(payload.toString()); } catch { state.lastGatewayStatus = payload.toString(); }

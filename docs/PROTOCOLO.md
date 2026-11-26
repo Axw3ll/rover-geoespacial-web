@@ -5,14 +5,15 @@ el sitio funcione con el firmware `Carrito_ESP32_Linea_Pivote.ino`.
 
 ## Tópicos
 
-Con `MQTT_TOPIC_PREFIX=udec/telematica/equipoX` y `DEVICE_ID=CAR01`, la base es
-`udec/telematica/equipoX/CAR01`.
+Con `MQTT_TOPIC_PREFIX=udec/telematica/equipoX`, `DEVICE_ID=CAR01` y `GATEWAY_ID=GW01`, la base es
+`udec/telematica/equipoX/CAR01`. Los tópicos `rx` y `status` se pueden cambiar con `MQTT_TOPIC_RX` y
+`MQTT_TOPIC_STATUS` en el `.env` si el gateway publica en otro lugar.
 
 | Tópico | Quién publica | Quién se suscribe | Contenido |
 |---|---|---|---|
-| `<base>/tx` | Gateway | Backend y navegador | Mensaje del rover **ya verificado** (sin la trama HMAC). Texto plano (`ENV,T=24.1,H=55.0,P=943.2hPa`) o JSON `{"msg":"...","rssi":-87,"snr":7.5}` |
+| `<base>/rx` | Gateway | Backend y navegador | Mensaje del rover **ya verificado** (sin la trama HMAC). JSON `{"device":"CAR01","seq":4460,"rssi":-83,"snr":3.0,"ms":16221843,"payload":"GPS,LAT=..."}` (también se acepta texto plano o `{"msg":"..."}`) |
 | `<base>/cmd` | Backend | Gateway | Comando en texto plano (`FWD`, `AUTO TARGET 19.24 -103.72`, `ROUTE BATCH 12 MORE 2\|TURN:PIVOT:LEFT:45\|FWD:5.00`) |
-| `<base>/gateway` | Gateway (opcional) | Backend y navegador | Estado del gateway, p. ej. `{"bat_v":3.95,"csq":18,"rssi":-80}` |
+| `<prefijo>/GW01/status` | Gateway | Backend y navegador | Estado del gateway, p. ej. `{"type":"connection","gateway":"GW01","online":true,"mode":"SIM","ms":16236758}` |
 | `<base>/web/cmd` | Navegador | Backend | `{"id","command","token"}` — el backend valida rol y reenvía a `<base>/cmd` |
 | `<base>/web/ack` | Backend | Navegador | `{"id","ok","error"}` |
 | `<base>/planner` | Backend (retenido) | Navegador | Estado del planificador del modo automático |
@@ -27,7 +28,7 @@ Trama recibida por LoRa: `V1|CAR01|GW01|SEQ|MENSAJE|HMAC`
 1. Separar por el **último** `|`: `firmado = V1|CAR01|GW01|SEQ|MENSAJE`, `mac = HMAC` (64 hex).
 2. Calcular `HMAC-SHA256(clave, firmado)` con la **misma** clave de 32 bytes que `LORA_HMAC_KEY_HEX`.
 3. Comparar en tiempo constante y exigir `SEQ > último SEQ del rover aceptado` (guardarlo en NVS).
-4. Publicar `MENSAJE` en `<base>/tx` (o el JSON con `rssi`/`snr` de `LoRa.packetRssi()`/`packetSnr()`).
+4. Publicar en `<base>/rx` el JSON con `payload` = `MENSAJE`, `seq`, y `rssi`/`snr` de `LoRa.packetRssi()`/`packetSnr()`.
 
 ## De la nube al rover (MQTT → LoRa)
 

@@ -10,7 +10,8 @@ const mqtt = require('mqtt');
 
 const prefix = (process.env.MQTT_TOPIC_PREFIX || 'udec/telematica/rover').replace(/\/+$/, '');
 const device = process.env.DEVICE_ID || 'CAR01';
-const TX = `${prefix}/${device}/tx`;
+const TX = process.env.MQTT_TOPIC_RX || `${prefix}/${device}/rx`;
+let seq = 0;
 const CMD = `${prefix}/${device}/cmd`;
 const LATENCY_MS = Number(process.env.SIM_LATENCY_MS || 400);   // LoRa + 2G aproximado
 const GPS_NOISE_M = Number(process.env.SIM_GPS_NOISE_M || 1.0);
@@ -32,7 +33,7 @@ const client = mqtt.connect(process.env.MQTT_URL || 'mqtt://broker.hivemq.com:18
 
 function send(text) {
   setTimeout(() => {
-    client.publish(TX, JSON.stringify({ msg: text, rssi: -60 - Math.round(Math.random() * 40), snr: +(5 + Math.random() * 5).toFixed(1) }));
+    client.publish(TX, JSON.stringify({ device, seq: ++seq, rssi: -60 - Math.round(Math.random() * 40), snr: +(5 + Math.random() * 5).toFixed(1), ms: Math.round(process.uptime() * 1000), payload: text }));
     console.log('<<', text);
   }, LATENCY_MS);
 }
