@@ -24,7 +24,7 @@ const config = {
   },
   // Contrato de tópicos con el gateway (ver docs/PROTOCOLO.md)
   topics: {
-    tx: `${base}/tx`,           // gateway -> nube: texto del rover ya verificado (HMAC)
+    tx: `${base}/rx`,           // gateway -> nube: texto del rover ya verificado (HMAC)
     cmd: `${base}/cmd`,         // nube -> gateway: comando en texto plano (el gateway lo firma)
     webCmd: `${base}/web/cmd`,  // navegador -> backend: {id, command, token}
     webAck: `${base}/web/ack`,  // backend -> navegador: {id, ok, error}
