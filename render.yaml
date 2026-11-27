@@ -32,5 +32,11 @@ services:
         value: GW01
       - key: PLANNER_ENABLED
         value: "true"
+      - key: PLANNER_MAX_LEG_M
+        value: "5"
+      - key: PLANNER_ARRIVE_RADIUS_M
+        value: "3"
+      - key: PLANNER_HEADING_MIN_M
+        value: "1.5"
       - key: TZ
         value: America/Mexico_City
